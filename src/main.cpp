@@ -7,6 +7,7 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "helpers.h"
 #include "json.hpp"
+#include "spline.h"
 
 // for convenience
 using nlohmann::json;
@@ -50,6 +51,8 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
 
+
+
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
                &map_waypoints_dx,&map_waypoints_dy]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
@@ -63,12 +66,12 @@ int main() {
 
       if (s != "") {
         auto j = json::parse(s);
-        
+
         string event = j[0].get<string>();
-        
+
         if (event == "telemetry") {
           // j[1] is the data JSON object
-          
+
           // Main car's localization Data
           double car_x = j[1]["x"];
           double car_y = j[1]["y"];
@@ -80,23 +83,116 @@ int main() {
           // Previous path data given to the Planner
           auto previous_path_x = j[1]["previous_path_x"];
           auto previous_path_y = j[1]["previous_path_y"];
-          // Previous path's end s and d values 
+          // Previous path's end s and d values
           double end_path_s = j[1]["end_path_s"];
           double end_path_d = j[1]["end_path_d"];
 
-          // Sensor Fusion Data, a list of all other cars on the same side 
+          // Sensor Fusion Data, a list of all other cars on the same side
           //   of the road.
           auto sensor_fusion = j[1]["sensor_fusion"];
 
           json msgJson;
 
+
+          double lane = 1.0;
+          double speed_tar = 49.5;
+
+
+          int prev_size = previous_path_x.size();
+
+
+          vector<double> points_x;
+          vector<double> points_y;
+
+
+          double ref_x = car_x;
+          double ref_y = car_y;
+          double ref_yaw = deg2rad(car_yaw);
+
+          if (prev_size<2){
+            double prev_car_x = car_x - cos(car_yaw);
+            double prev_car_y = car_y - sin(car_yaw);
+
+            points_x.push_back(prev_car_x);
+            points_x.push_back(car_x);
+
+            points_y.push_back(prev_car_y);
+            points_y.push_back(car_y);
+          }else{
+            ref_x = previous_path_x[prev_size-1];
+            ref_y = previous_path_y[prev_size-1];
+
+            double prev_ref_x = previous_path_x[prev_size-2];
+            double prev_ref_y = previous_path_y[prev_size-2];
+            ref_yaw = atan2(ref_y - prev_ref_y, ref_x - prev_ref_x);
+
+            points_x.push_back(prev_ref_x);
+            points_x.push_back(ref_x);
+
+            points_y.push_back(prev_ref_y);
+            points_y.push_back(ref_y);
+          }
+
+          vector <double> next_wp0 = getXY(car_s + 30, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          vector <double> next_wp1 = getXY(car_s + 60, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+          vector <double> next_wp2 = getXY(car_s + 90, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+
+          points_x.push_back(next_wp0[0]);
+          points_x.push_back(next_wp1[0]);
+          points_x.push_back(next_wp2[0]);
+
+          points_y.push_back(next_wp0[1]);
+          points_y.push_back(next_wp1[1]);
+          points_y.push_back(next_wp2[1]);
+
+          for (int i =0; i<points_x.size(); i++){
+            double shift_x = points_x[i] - ref_x;
+            double shift_y = points_y[i] - ref_y;
+
+            points_x[i] = (shift_x*cos(0-ref_yaw)-shift_y*sin(0-ref_yaw));
+            points_y[i] = (shift_x*sin(0-ref_yaw)+shift_y*cos(0-ref_yaw));
+            std::cout << "points_x[" << i << "] = " << points_x[i] << std::endl;
+            std::cout << "points_y[" << i << "] = " << points_y[i] << std::endl;
+          }
+
+          tk::spline spl;
+          spl.set_points(points_x, points_y);
+
           vector<double> next_x_vals;
           vector<double> next_y_vals;
 
-          /**
-           * TODO: define a path made up of (x,y) points that the car will visit
-           *   sequentially every .02 seconds
-           */
+
+          for (int i = 0; i < previous_path_x.size(); ++i) {
+            next_x_vals.push_back(previous_path_x[i]);
+            next_y_vals.push_back(previous_path_y[i]);
+          }
+
+          double x_tar = 30.0;
+          double y_tar = spl(x_tar);
+          double dist_tar = sqrt((x_tar*x_tar) + (y_tar*y_tar));
+
+          double x_add_on = 0;
+
+          for (int i = 1; i <= 50-previous_path_x.size(); i++){
+
+            double N = (dist_tar/(.02*speed_tar/2.24));
+            double x_point = x_add_on + x_tar/N;
+            double y_point = spl(x_point);
+
+            x_add_on = x_point;
+
+            //backward rotation for map coordinates
+
+            x_point = ref_x*cos(ref_yaw)-ref_y*sin(ref_yaw);
+            y_point = ref_x*sin(ref_yaw)+ref_y*cos(ref_yaw);
+
+            x_point += ref_x;
+            y_point += ref_y;
+
+            next_x_vals.push_back(x_point);
+            next_y_vals.push_back(y_point);
+
+          }
 
 
           msgJson["next_x"] = next_x_vals;
@@ -131,6 +227,6 @@ int main() {
     std::cerr << "Failed to listen to port" << std::endl;
     return -1;
   }
-  
+
   h.run();
 }
