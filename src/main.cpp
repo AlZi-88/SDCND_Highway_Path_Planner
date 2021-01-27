@@ -49,6 +49,7 @@ int main() {
   double speed_tar = 49.5;
   double speed_sp = 0.0;
   int state_vehicle = FOLLOW_LANE;
+  double time_lane_change = 5;
 
   std::ifstream in_map_(map_file_.c_str(), std::ifstream::in);
 
@@ -77,7 +78,7 @@ int main() {
 
 
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
-               &map_waypoints_dx,&map_waypoints_dy, &lane, &speed_sp, &speed_tar, &state_vehicle]
+               &map_waypoints_dx,&map_waypoints_dy, &lane, &speed_sp, &speed_tar, &state_vehicle, &time_lane_change]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -142,7 +143,11 @@ int main() {
               front_car.s = sensor_fusion[i][5];
 
               front_car.predicted_s = front_car.s + (double)prev_size*.02*front_car.speed;
-              front_cars.push_back(front_car);
+              if (front_car.predicted_s > car_s){
+                //car is really in fron of me
+                front_cars.push_back(front_car);
+              }
+
             }else if(d< (2+4*(lane-1)+2) && d > (2+4*(lane-1) -2)){
               //then car is on left lane
               car left_car;
@@ -170,43 +175,109 @@ int main() {
 
             }
           }
+          std::cout << "number of front vehicles "<< front_cars.size() << std::endl;
+          std::cout << "number of left vehicles "<< left_cars.size() << std::endl;
+          std::cout << "number of right vehicles "<< right_cars.size() << std::endl;
+          int closest=0;
+          double distance=9999999.0;
+          bool front_vehicle_close = false;
           for (int i = 0; i< front_cars.size(); i++){
-            if (front_cars[i].predicted_s > car_s && front_cars[i].predicted_s - car_s < 30){
+
+            if ((distance > (front_cars[i].predicted_s - car_s)) && ((front_cars[i].predicted_s - car_s) < 30)){
               //then other car is coming close, so reduce velocity
               //speed_tar = 29.5;
-              speed_tar = front_cars[i].predicted_s;
-              state_vehicle = PLCL;
 
-            } else{
-              state_vehicle = FOLLOW_LANE;
+              closest = i;
+              distance = front_cars[i].predicted_s - car_s;
+              front_vehicle_close = true;
             }
 
           }
 
+          double s_min = car_s - 10;
+          double s_max = car_s +30;
+          bool left_lane_blocked = false;
+          for (int i = 0; i< left_cars.size(); i++){
 
+            if (left_cars[i].predicted_s > s_min && left_cars[i].predicted_s <= s_max){
+              //left lane is occupied by another car
+              //speed_tar = 29.5;
+
+              left_lane_blocked = true;
+            }
+
+          }
+
+          bool right_lane_blocked = false;
+          for (int i = 0; i< right_cars.size(); i++){
+
+            if (right_cars[i].predicted_s > s_min && right_cars[i].predicted_s <= s_max){
+              //left lane is occupied by another car
+              //speed_tar = 29.5;
+
+              right_lane_blocked = true;
+            }
+
+          }
+          std::cout << "Front vehicle is close " << front_vehicle_close << std::endl;
+          std::cout << "Left lane is blocked " << left_lane_blocked << std::endl;
+          std::cout << "Right lane is blocked " << right_lane_blocked << std::endl;
 
           if (state_vehicle == FOLLOW_LANE){
             speed_tar = 49.5;
-            if(speed_sp < speed_tar){
-              //accelerate
-              speed_sp += .224;
+            if (front_vehicle_close){
+              speed_tar = front_cars[closest].speed*2.24;
+              if (lane > 0 && time_lane_change <= 0){
+                state_vehicle = PLCL;
+              }else if (lane < 2 && !right_lane_blocked&& time_lane_change <= 0){
+                state_vehicle = PLCR;
+              }
+            }else if (lane < 2 && !right_lane_blocked && time_lane_change <= 0){
+              state_vehicle = PLCR;
+            }
+            if (time_lane_change >= 0){
+              time_lane_change -= 0.02;
             }
           }else if(state_vehicle == PLCL){
-            if (speed_sp > speed_tar){
-              //slow down to front vehicles speed
-              speed_sp -= .224;
+            if (front_vehicle_close){
+              speed_tar = front_cars[closest].speed*2.24;
+            }
+            if (!left_lane_blocked){
+              state_vehicle = LCL;
+            }else if (distance > 30){
+              state_vehicle = FOLLOW_LANE;
             }
           }else if(state_vehicle == PLCR){
-            if (speed_sp > speed_tar){
-              //slow down to front vehicles speed
-              speed_sp -= .224;
+
+            if (front_vehicle_close){
+              speed_tar = front_cars[closest].speed*2.24;
+            }
+            if (!right_lane_blocked){
+              state_vehicle = LCR;
+            }else if (distance > 30){
+              state_vehicle = FOLLOW_LANE;
             }
           }else if(state_vehicle == LCL){
             lane -= 1;
+            state_vehicle = FOLLOW_LANE;
+            time_lane_change = 5;
           }else if(state_vehicle == LCR){
             lane += 1;
+            state_vehicle = FOLLOW_LANE;
+            time_lane_change = 5;
           }
-          std::cout << state_vehicle << "front vehicle speed "<< front_cars[0].predicted_s << std::endl;
+
+          if(speed_sp < speed_tar){
+            //accelerate
+            speed_sp += .224;
+          } else if (speed_sp > speed_tar){
+            speed_sp -= .224;
+          }
+          std::cout << "vehicle state = "<< state_vehicle << "timer = " << time_lane_change << std::endl;
+          if (front_cars.size() > 0){
+            std::cout << "front vehicle speed of car number "<< closest << " is " << front_cars[closest].speed*2.24 << std::endl;
+          }
+
           vector<double> points_x;
           vector<double> points_y;
 
