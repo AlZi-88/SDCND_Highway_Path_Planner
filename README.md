@@ -1,6 +1,6 @@
 # CarND-Path-Planning-Project
 Self-Driving Car Engineer Nanodegree Program
-   
+
 ### Simulator.
 You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab (https://github.com/udacity/self-driving-car-sim/releases/tag/T3_v1.2).  
 
@@ -43,13 +43,13 @@ Here is the data provided from the Simulator to the C++ Program
 #### Previous path data given to the Planner
 
 //Note: Return the previous list but with processed points removed, can be a nice tool to show how far along
-the path has processed since last time. 
+the path has processed since last time.
 
 ["previous_path_x"] The previous list of x points previously given to the simulator
 
 ["previous_path_y"] The previous list of y points previously given to the simulator
 
-#### Previous path's end s and d values 
+#### Previous path's end s and d values
 
 ["end_path_s"] The previous list's last point's frenet s value
 
@@ -57,7 +57,7 @@ the path has processed since last time.
 
 #### Sensor Fusion Data, a list of all other car's attributes on the same side of the road. (No Noise)
 
-["sensor_fusion"] A 2d vector of cars and then that car's [car's unique ID, car's x position in map coordinates, car's y position in map coordinates, car's x velocity in m/s, car's y velocity in m/s, car's s position in frenet coordinates, car's d position in frenet coordinates. 
+["sensor_fusion"] A 2d vector of cars and then that car's [car's unique ID, car's x position in map coordinates, car's y position in map coordinates, car's x velocity in m/s, car's y velocity in m/s, car's s position in frenet coordinates, car's d position in frenet coordinates.
 
 ## Details
 
@@ -87,59 +87,37 @@ A really helpful resource for doing this project and creating smooth trajectorie
   * Run either `install-mac.sh` or `install-ubuntu.sh`.
   * If you install from source, checkout to commit `e94b6e1`, i.e.
     ```
-    git clone https://github.com/uWebSockets/uWebSockets 
+    git clone https://github.com/uWebSockets/uWebSockets
     cd uWebSockets
     git checkout e94b6e1
     ```
 
-## Editor Settings
+## Reflection
 
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
+To generate paths I use a state machine which takes as input data about its environment from sensor fusion and which decides finally which lane to take at which speed. Generally I implemented the state machine in a way so that it prefers to use right lanes in general and to pass other vehicles it prefers to pass left.
 
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
+To get an overview of other cars on the road I first cluster them dependent on the lane relative to the current position. This means I have a vector of
+* Cars in front of my car (`vector < car > front_cars`)
+* Cars left of me (`vector < car > left_cars`)
+* Cars on the right (`vector < car > right_cars`)
 
-## Code Style
+`car` is a class I defined to have an overview of all relevant data without having to car about indices in sensor fusion data:
+```
+struct car{
+  double x;
+  double y;
+  double s;
+  double predicted_s;
+  double d;
+  double yaw;
+  double speed;
+};
+```
 
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
+To see whether a lane is blocked or not I define a corridor of 10 m behind my car and 30 m in front of me to ensure a safe lane change. If any car is within this corridor I inhibit a lane change in the state machine and wait for all vehicles to pass. If a lane is occupied or not is indicated in `right_lane_blocked` and `left_lane_blocked` variables.
 
-## Project Instructions and Rubric
+I also adapt the speed of my car and slow down in case a slower vehicle is in front of me. To ensure this I assign the target vehicle speed (`speed_tar`) to the slower vehicle speed of the car in front. To ensure a smooth transition without violating jerk limits I increment my speed set point (`speed_sp`) until it reaches the target vehicle speed. Same is done for accelerations as well.
 
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
+To give a smooth path I then use a spline function (http://kluge.in-chemnitz.de/opensource/spline/) through three upcoming waypoints in 30 m, 60 m and 90 m in front of me. My points on this function are used then until 30 m in front of me. Smoothening is ensured by using previous paths and only adding new waypoints to fill the the points which have been passed within one cycle. This also reduced the number of points which have to be added to the path which makes calculation more efficient.
 
-
-## Call for IDE Profiles Pull Requests
-
-Help your fellow students!
-
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
-
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
-
+The current solution succeeds in navigating through the traffic without causing accident or violating speed or jerk limits. However sometimes the car doesn't find the smartest or fastest possible path through the traffic. To achieve this I will add a cost function which decides dependent on average lane speed on which side to pass most efficiently.

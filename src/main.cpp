@@ -201,7 +201,6 @@ int main() {
 
             if (left_cars[i].predicted_s > s_min && left_cars[i].predicted_s <= s_max){
               //left lane is occupied by another car
-              //speed_tar = 29.5;
 
               left_lane_blocked = true;
             }
@@ -212,8 +211,7 @@ int main() {
           for (int i = 0; i< right_cars.size(); i++){
 
             if (right_cars[i].predicted_s > s_min && right_cars[i].predicted_s <= s_max){
-              //left lane is occupied by another car
-              //speed_tar = 29.5;
+              //right lane is occupied by another car
 
               right_lane_blocked = true;
             }
